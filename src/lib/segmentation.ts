@@ -76,16 +76,10 @@ export interface MaskTexture {
   edgeImageData: ImageData
   width: number
   height: number
-  /** Latest alpha matte for foreground colour unmixing. */
+  previous: Float32Array | null
+  /** Latest alpha matte, kept for foreground colour unmixing. */
   alpha: Float32Array | null
-  /** Rolling temporal buffer of recent alpha mattes (kills frame-to-frame boil). */
-  history: Float32Array[]
-  historyIdx: number
-  /** Latest frame luminance, downsampled to mask resolution (used as guided-filter guide). */
-  guide: Uint8ClampedArray | null
 }
-
-const TEMPORAL_WINDOW = 5 // number of frames to average for temporal stability
 
 export function createMaskTexture(): MaskTexture {
   const canvas = document.createElement('canvas')
@@ -108,42 +102,14 @@ export function createMaskTexture(): MaskTexture {
     edgeImageData: edgeContext.createImageData(256, 256),
     width: 256,
     height: 256,
+    previous: null,
     alpha: null,
-    history: [],
-    historyIdx: 0,
-    guide: null,
   }
 }
 
 export function resetMaskTexture(texture: MaskTexture) {
+  texture.previous = null
   texture.alpha = null
-  texture.history = []
-  texture.historyIdx = 0
-  texture.guide = null
-}
-
-/** Downsample video frame to mask resolution and extract luminance as guide. */
-export function captureFrameGuide(
-  texture: MaskTexture,
-  video: HTMLVideoElement,
-): void {
-  const w = texture.width
-  const h = texture.height
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) return
-  ctx.drawImage(video, 0, 0, w, h)
-  const data = ctx.getImageData(0, 0, w, h).data
-  const guide = new Uint8ClampedArray(w * h)
-  for (let i = 0; i < w * h; i += 1) {
-    const o = i * 4
-    // Rec. 601 luma
-    guide[i] =
-      data[o] * 0.299 + data[o + 1] * 0.587 + data[o + 2] * 0.114
-  }
-  texture.guide = guide
 }
 
 function smoothstep(value: number) {
@@ -151,10 +117,24 @@ function smoothstep(value: number) {
   return t * t * (3 - 2 * t)
 }
 
+interface PickedMask {
+  mask: ImageSegmenterResult['confidenceMasks'][number] | NonNullable<
+    ImageSegmenterResult['categoryMask']
+  >
+  alphaSource: 'confidence' | 'category'
+  invertChannel?: boolean
+  /**
+   * Confidence for the hair class only, when the multiclass model provides it.
+   * Hair sits below the body's confidence and a single global threshold amputates
+   * it, so `renderMask` lowers the threshold proportionally to this channel.
+   */
+  hair?: Float32Array
+}
+
 function pickPersonMask(
   result: ImageSegmenterResult,
   segmenter: ImageSegmenter,
-) {
+): PickedMask {
   const confidenceMasks = result.confidenceMasks
   if (!confidenceMasks?.length) {
     if (result.categoryMask) {
@@ -164,23 +144,42 @@ function pickPersonMask(
   }
 
   const labels = segmenter.getLabels()
+
+  // Multiclass selfie model exposes hair as its own class. Read it before the
+  // person mask so the hair channel can relax the threshold later on.
+  let hair: Float32Array | undefined
+  const hairIndex = labels.findIndex((label) => /\bhair\b/i.test(label))
+  if (hairIndex >= 0 && confidenceMasks[hairIndex]) {
+    hair = confidenceMasks[hairIndex].getAsFloat32Array()
+  }
+
   const background = labels.findIndex((label) => /background/i.test(label))
   if (background >= 0 && confidenceMasks[background]) {
     return {
       mask: confidenceMasks[background],
       alphaSource: 'confidence' as const,
       invertChannel: true,
+      hair,
     }
   }
 
   if (confidenceMasks.length === 1) {
-    return { mask: confidenceMasks[0], alphaSource: 'confidence' as const }
+    return {
+      mask: confidenceMasks[0],
+      alphaSource: 'confidence' as const,
+      hair,
+    }
   }
 
-  return { mask: confidenceMasks[1], alphaSource: 'confidence' as const }
+  // Binary selfie segmenter: [background, person].
+  return {
+    mask: confidenceMasks[1],
+    alphaSource: 'confidence' as const,
+    hair,
+  }
 }
 
-/** Separable box blur — O(N) smoothing for the confidence map. */
+/** Cheap separable box blur — smooths the 256px confidence map before thresholding. */
 function blur(values: Float32Array, width: number, height: number) {
   const tmp = new Float32Array(values.length)
   for (let y = 0; y < height; y += 1) {
@@ -206,182 +205,87 @@ function blur(values: Float32Array, width: number, height: number) {
   return out
 }
 
-/** Box-filter guided filter (O(N)) — edge-preserving smoothing of alpha
- *  using frame luminance as guide. Keeps edges sharp where colour changes,
- *  smooths flat areas. */
-function guidedFilter(
-  guide: Uint8ClampedArray, // luminance at same resolution as src
-  src: Float32Array,
-  width: number,
-  height: number,
-  radius: number,
-  eps: number,
-): Float32Array {
-  const n = width * height
-  const invArea = 1 / ((2 * radius + 1) * (2 * radius + 1))
 
-  const boxGuide = new Float32Array(n)
-  const boxSrc = new Float32Array(n)
-  const boxGs = new Float32Array(n)
-  const boxG2 = new Float32Array(n)
+/** Removes isolated specks and fills holes so the matte is one clean shape. */
+function cleanBinary(binary: Uint8Array, width: number, height: number) {
+  const total = width * height
+  const visited = new Uint8Array(total)
+  const stack = new Int32Array(total)
+  const minArea = Math.max(18, Math.round(total * 0.0008))
 
-  // Horizontal pass
-  for (let y = 0; y < height; y += 1) {
-    const base = y * width
-    let gSum = 0
-    let sSum = 0
-    let gsSum = 0
-    let g2Sum = 0
-    for (let x = 0; x < width; x += 1) {
-      const i = base + x
-      gSum += guide[i]
-      sSum += src[i]
-      gsSum += guide[i] * src[i]
-      g2Sum += guide[i] * guide[i]
-      if (x >= 2 * radius + 1) {
-        const j = base + x - (2 * radius + 1)
-        gSum -= guide[j]
-        sSum -= src[j]
-        gsSum -= guide[j] * src[j]
-        g2Sum -= guide[j] * guide[j]
+  // Drop connected person blobs that are too small (segmentation speckles).
+  for (let seed = 0; seed < total; seed += 1) {
+    if (!binary[seed] || visited[seed]) continue
+    let top = 0
+    stack[top++] = seed
+    visited[seed] = 1
+    const members: number[] = []
+    while (top > 0) {
+      const index = stack[--top]
+      members.push(index)
+      const x = index % width
+      const y = (index - x) / width
+      if (x > 0 && binary[index - 1] && !visited[index - 1]) {
+        visited[index - 1] = 1
+        stack[top++] = index - 1
       }
-      boxGuide[i] = gSum
-      boxSrc[i] = sSum
-      boxGs[i] = gsSum
-      boxG2[i] = g2Sum
+      if (x < width - 1 && binary[index + 1] && !visited[index + 1]) {
+        visited[index + 1] = 1
+        stack[top++] = index + 1
+      }
+      if (y > 0 && binary[index - width] && !visited[index - width]) {
+        visited[index - width] = 1
+        stack[top++] = index - width
+      }
+      if (y < height - 1 && binary[index + width] && !visited[index + width]) {
+        visited[index + width] = 1
+        stack[top++] = index + width
+      }
+    }
+    if (members.length < minArea) {
+      for (const index of members) binary[index] = 0
     }
   }
 
-  // Vertical pass using the horizontal box sums
-  const out = new Float32Array(n)
-
+  // Fill enclosed holes: flood the background from the border, then any zero
+  // pixel the flood never reaches is an interior hole.
+  const reached = new Uint8Array(total)
+  let top = 0
   for (let x = 0; x < width; x += 1) {
-    let gSum = 0
-    let sSum = 0
-    let gsSum = 0
-    let g2Sum = 0
-    for (let y = 0; y < height; y += 1) {
-      const i = y * width + x
-      gSum += boxGuide[i]
-      sSum += boxSrc[i]
-      gsSum += boxGs[i]
-      g2Sum += boxG2[i]
-      if (y >= 2 * radius + 1) {
-        const j = (y - (2 * radius + 1)) * width + x
-        gSum -= boxGuide[j]
-        sSum -= boxSrc[j]
-        gsSum -= boxGs[j]
-        g2Sum -= boxG2[j]
-      }
-      if (y >= radius) {
-        const meanG = gSum * invArea
-        const meanI = sSum * invArea
-        const corrGI = gsSum * invArea - meanG * meanI
-        const varG = g2Sum * invArea - meanG * meanG
-        const a = corrGI / (varG + eps)
-        const b = meanI - a * meanG
-        out[i] = a * guide[i] + b
-      } else {
-        out[i] = src[i]
-      }
-    }
+    stack[top++] = x
+    stack[top++] = (height - 1) * width + x
   }
-
-  return out
-}
-
-/** Morphological opening: erode then dilate — removes speckles and thin spikes. */
-function morphologicalOpen(binary: Uint8Array, width: number, height: number) {
-  erode(binary, width, height)
-  dilate(binary, width, height)
-}
-
-/** Morphological closing: dilate then erode — fills small holes. */
-function morphologicalClose(binary: Uint8Array, width: number, height: number) {
-  dilate(binary, width, height)
-  erode(binary, width, height)
-}
-
-function erode(binary: Uint8Array, width: number, height: number) {
-  const out = new Uint8Array(binary.length)
   for (let y = 0; y < height; y += 1) {
-    const row = y * width
-    for (let x = 0; x < width; x += 1) {
-      const i = row + x
-      if (!binary[i]) continue
-      // 4-connected erosion: pixel survives only if all 4 neighbors are foreground
-      let keep = true
-      if (x > 0 && !binary[i - 1]) keep = false
-      if (x < width - 1 && !binary[i + 1]) keep = false
-      if (y > 0 && !binary[i - width]) keep = false
-      if (y < height - 1 && !binary[i + width]) keep = false
-      out[i] = keep ? 1 : 0
-    }
+    stack[top++] = y * width
+    stack[top++] = y * width + width - 1
   }
-  binary.set(out)
+  while (top > 0) {
+    const index = stack[--top]
+    if (reached[index] || binary[index]) continue
+    reached[index] = 1
+    const x = index % width
+    const y = (index - x) / width
+    if (x > 0) stack[top++] = index - 1
+    if (x < width - 1) stack[top++] = index + 1
+    if (y > 0) stack[top++] = index - width
+    if (y < height - 1) stack[top++] = index + width
+  }
+  for (let i = 0; i < total; i += 1) {
+    if (!binary[i] && !reached[i]) binary[i] = 1
+  }
 }
 
-function dilate(binary: Uint8Array, width: number, height: number) {
-  const out = new Uint8Array(binary.length)
-  for (let y = 0; y < height; y += 1) {
-    const row = y * width
-    for (let x = 0; x < width; x += 1) {
-      const i = row + x
-      if (binary[i]) {
-        out[i] = 1
-        continue
-      }
-      let set = false
-      if (x > 0 && binary[i - 1]) set = true
-      if (x < width - 1 && binary[i + 1]) set = true
-      if (y > 0 && binary[i - width]) set = true
-      if (y < height - 1 && binary[i + width]) set = true
-      out[i] = set ? 1 : 0
-    }
-  }
-  binary.set(out)
-}
-
-/** Temporal blend: average recent alpha mattes with weights biased toward
- *  the current frame. This is the single biggest fix for "TV from the 60s"
- *  flicker — it locks the matte across frames so edges don't boil. */
-function temporalBlend(
-  texture: MaskTexture,
-  current: Float32Array,
-): Float32Array {
-  const n = current.length
-  const history = texture.history
-  const idx = texture.historyIdx
-
-  // Store current frame in circular buffer
-  if (history.length < TEMPORAL_WINDOW) {
-    history.push(current.slice())
-  } else {
-    history[idx] = current.slice()
-  }
-  texture.historyIdx = (idx + 1) % Math.max(1, TEMPORAL_WINDOW)
-
-  const count = history.length
-  const out = new Float32Array(n)
-  // Weights: current frame strongest, decaying for older frames
-  const totalWeight = count * (count + 1) / 2
-  let accWeight = 0
-  for (let k = 0; k < count; k += 1) {
-    const h = history[k]
-    // weight: newest = count, oldest = 1
-    const w = count - k
-    accWeight += w
-    for (let i = 0; i < n; i += 1) {
-      out[i] += h[i] * w
-    }
-  }
-  const inv = 1 / totalWeight
-  for (let i = 0; i < n; i += 1) {
-    out[i] *= inv
-  }
-  return out
-}
-
+/**
+ * Builds the alpha matte from a segmentation result.
+ *
+ * `video` is accepted for call-site compatibility but is no longer used here.
+ * Edge alignment used to happen by guiding the 256px mask with frame
+ * luminance captured on the *first* frame only, so once the subject moved the
+ * matte was snapped to a stale silhouette — which is what left background bits
+ * behind. The guide now lives in `matting.ts`, where it is rebuilt every frame
+ * from the full-resolution frame (luminance plus colour distance to the local
+ * background) while the matte is being refined.
+ */
 export function renderMask(
   texture: MaskTexture,
   result: ImageSegmenterResult,
@@ -394,6 +298,7 @@ export function renderMask(
   },
   video?: HTMLVideoElement,
 ) {
+  void video
   const picked = pickPersonMask(result, segmenter)
   const mask = picked.mask
   const width = mask.width
@@ -408,15 +313,7 @@ export function renderMask(
     texture.height = height
     texture.imageData = texture.context.createImageData(width, height)
     texture.edgeImageData = texture.edgeContext.createImageData(width, height)
-    texture.alpha = null
-    texture.history = []
-    texture.historyIdx = 0
-    texture.guide = null
-  }
-
-  // Capture frame luminance for guided filtering (video only)
-  if (video && texture.guide === null) {
-    captureFrameGuide(texture, video)
+    texture.previous = null
   }
 
   const raw =
@@ -430,6 +327,7 @@ export function renderMask(
       values = values.slice()
       for (let i = 0; i < values.length; i += 1) values[i] = 1 - values[i]
     }
+    // Blur once to remove the blocky 256-grid staircase before thresholding.
     values = blur(values, width, height)
   } else {
     const bytes = raw as Uint8Array
@@ -437,49 +335,65 @@ export function renderMask(
     for (let i = 0; i < bytes.length; i += 1) values[i] = bytes[i] > 0 ? 1 : 0
   }
 
+  const smoothing = Math.min(0.9, Math.max(0, options.smoothing ?? 0))
+  const hair = picked.hair
+  const hairLift = hair && hair.length === values.length ? 0.22 : 0
+
+  // Temporal smoothing runs on the *confidence* field, before thresholding.
+  // Smoothing the binarised alpha instead made the silhouette jump between two
+  // discrete shapes every frame, which is what reads as "boiling" edges.
+  const previous =
+    texture.previous && texture.previous.length === values.length
+      ? texture.previous
+      : null
+  const next = previous ?? new Float32Array(values.length)
+  if (previous && smoothing > 0) {
+    for (let i = 0; i < values.length; i += 1) {
+      const delta = Math.abs(values[i] - previous[i])
+      // Moving pixels adopt the new frame quickly; still ones keep most of the
+      // history so sensor noise cannot flicker the outline.
+      const factor = smoothing * (delta > 0.18 ? 0.25 : 1)
+      values[i] = previous[i] * factor + values[i] * (1 - factor)
+      next[i] = values[i]
+    }
+  } else {
+    for (let i = 0; i < values.length; i += 1) next[i] = values[i]
+    values = next
+  }
+  texture.previous = next
+
   const data = texture.imageData.data
   const edgeData = texture.edgeImageData.data
   const feather = Math.max(0.004, options.feather)
-  const low = options.threshold - feather
-  const high = options.threshold + feather
 
-  // --- TRIMAP: confident FG, confident BG, unknown band in between ---
+  // Threshold, then repair the silhouette. Hair is held back by a global cut,
+  // so the threshold is relaxed wherever the hair class is confident.
   const binary = new Uint8Array(width * height)
   for (let i = 0; i < values.length; i += 1) {
-    binary[i] = values[i] > options.threshold ? 1 : 0
+    const lift = hairLift > 0 ? hairLift * hair![i] : 0
+    binary[i] = values[i] > options.threshold - lift ? 1 : 0
+  }
+  const before = binary.slice()
+  cleanBinary(binary, width, height)
+
+  // Fold the repair back into the confidence field instead of hard-gating the
+  // alpha. Specks drop to 0, holes rise to solid, and the feather band around
+  // the real silhouette stays continuous — previously alpha stepped from 0 to
+  // 0.55 at the boundary, which produced a jagged edge and a bright fringe.
+  const solid = options.threshold + feather
+  for (let i = 0; i < values.length; i += 1) {
+    if (before[i] && !binary[i]) values[i] = 0
+    else if (!before[i] && binary[i] && values[i] < solid) values[i] = solid
   }
 
-  // Morphological opening kills speckles, closing fills holes
-  morphologicalOpen(binary, width, height)
-  morphologicalClose(binary, width, height)
+  const alpha = new Float32Array(values.length)
 
-  // --- TEMPORAL BLEND: average with recent frames for stability ---
-  const blended = temporalBlend(texture, values)
-
-  // --- GUIDED FILTER: edge-preserving refinement using frame luminance ---
-  let refined = blended
-  if (texture.guide) {
-    refined = guidedFilter(texture.guide, blended, width, height, 3, 0.01)
-  }
-
-  // --- FINAL ALPHA: crisp interior, soft edge band ---
-  const alpha = new Float32Array(blended.length)
-  for (let i = 0; i < blended.length; i += 1) {
-    let a = binary[i]
-      ? Math.min(1, Math.max(0, refined[i]))
-      : 0
-
-    // Softstep in the feather band around the threshold
-    if (!binary[i]) {
-      a = 0
-    } else if (refined[i] > high) {
-      a = 1
-    } else if (refined[i] < low) {
-      a = 0
-    } else {
-      a = smoothstep((refined[i] - low) / (high - low || 0.0001))
-    }
-
+  for (let i = 0; i < values.length; i += 1) {
+    const lift = hairLift > 0 ? hairLift * hair![i] : 0
+    const centre = options.threshold - lift
+    const low = centre - feather
+    const high = centre + feather
+    let a = smoothstep((values[i] - low) / (high - low || 0.0001))
     if (options.invert) a = 1 - a
 
     alpha[i] = a
@@ -489,6 +403,7 @@ export function renderMask(
     data[offset + 2] = 255
     data[offset + 3] = Math.round(a * 255)
 
+    // Edge band: peaks at 50% alpha, where colour contamination lives.
     const band = Math.round(a * (1 - a) * 4 * 255)
     edgeData[offset] = 255
     edgeData[offset + 1] = 255

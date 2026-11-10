@@ -15,8 +15,15 @@ const fs = require('fs')
   page.on('pageerror', (err) => logs.push(`[pageerror] ${err.message}`))
   await page.goto('http://127.0.0.1:5173', { waitUntil: 'networkidle' })
 
+  // Landing page -> studio (no account).
+  await page.waitForTimeout(1200)
+  await page.getByText('Start a project', { exact: false }).first().click()
+  await page.waitForTimeout(1200)
+  await page.getByText('Continue without account', { exact: false }).click()
+  await page.waitForTimeout(1000)
+
   await page.setInputFiles('input[type=file]', path.join(__dirname, 'fixtures/sample-person.webm'))
-  await page.waitForSelector('.asset-tile', { timeout: 30000 })
+  await page.waitForSelector('[class*=asset]', { timeout: 30000 })
   await page.waitForTimeout(1200)
   await page.screenshot({ path: 'shot-video-loaded.png' })
   console.log('loaded status', await page.locator('.canvas-status').allTextContents())

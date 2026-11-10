@@ -14,6 +14,8 @@ dist-ssr
 
 # Test artifacts
 shot-*.png
+alpha-heat.png
+cutout-magenta.png
 test/fixtures/sample-person.webm
 
 # Editor directories and files

@@ -51,13 +51,13 @@ export async function removeImageBackgroundAI(
     try {
       const blob = await run('gpu', 'isnet')
       onProgress({ label: 'Cleaning up edge colours', percent: 98 })
-      return await decontaminateImageBlob(blob)
+      return await decontaminateImageBlob(blob, file)
     } catch {
       onProgress({ label: 'Switching to a faster model', percent: 18 })
       try {
         const blob = await run('gpu', 'isnet_fp16')
         onProgress({ label: 'Cleaning up edge colours', percent: 98 })
-        return await decontaminateImageBlob(blob)
+        return await decontaminateImageBlob(blob, file)
       } catch {
         onProgress({ label: 'Switching to on-device CPU', percent: 18 })
       }
@@ -67,11 +67,11 @@ export async function removeImageBackgroundAI(
   try {
     const blob = await run('cpu', 'isnet')
     onProgress({ label: 'Cleaning up edge colours', percent: 98 })
-    return await decontaminateImageBlob(blob)
+    return await decontaminateImageBlob(blob, file)
   } catch {
     onProgress({ label: 'Trying a lighter model', percent: 22 })
   }
   const blob = await run('cpu', 'isnet_fp16')
   onProgress({ label: 'Cleaning up edge colours', percent: 98 })
-  return await decontaminateImageBlob(blob)
+  return await decontaminateImageBlob(blob, file)
 }
