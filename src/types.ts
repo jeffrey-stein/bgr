@@ -36,6 +36,7 @@ export interface MediaAsset {
   cutoutStatus: CutoutStatus
   videoCutout: boolean
   audio?: ExtractedAudio
+  audioMode?: 'full' | 'voice' | 'background'
 }
 
 export interface VideoMeta {

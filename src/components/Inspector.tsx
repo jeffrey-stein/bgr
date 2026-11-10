@@ -79,7 +79,7 @@ export function Inspector({
   onToggleVideoCutout: (next: boolean) => void
   onRemoveImage: () => void
   onRestoreImage: () => void
-  onExtractAudio: () => void
+  onExtractAudio: (mode?: 'full' | 'voice' | 'background') => void
   onDownloadAudio: () => void
   onOpenExport: () => void
   onThreshold: (value: number) => void

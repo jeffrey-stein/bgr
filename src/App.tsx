@@ -457,7 +457,10 @@ function App() {
     }
   }
 
-  const handleExtractAudio = async (asset: MediaAsset | null = activeAsset) => {
+  const handleExtractAudio = async (
+    asset: MediaAsset | null = activeAsset,
+    mode: 'full' | 'voice' | 'background' = asset?.audioMode ?? 'full',
+  ) => {
     if (!asset || asset.kind !== 'video' || processing) return
     setProcessing({
       assetId: asset.id,
@@ -466,8 +469,8 @@ function App() {
       progress: 28,
     })
     try {
-      const audio = await extractAudio(asset.file)
-      patchAsset(asset.id, { audio })
+      const audio = await extractAudio(asset.file, mode)
+      patchAsset(asset.id, { audio, audioMode: mode })
       setProcessing({
         assetId: asset.id,
         kind: 'audio',
@@ -476,8 +479,10 @@ function App() {
       })
       setTool('audio')
       setLibraryOpen(true)
+      const modeLabel =
+        mode === 'voice' ? 'Vocals isolated' : mode === 'background' ? 'Background isolated' : 'Soundtrack extracted'
       notify(
-        'Soundtrack extracted',
+        modeLabel,
         `${fileBaseName(asset.name)}-audio.wav is ready to download.`,
         'success',
       )
@@ -679,7 +684,7 @@ function App() {
             onRemoveImage={handleRemoveImage}
             onRestoreImage={handleRestoreImage}
             onBackground={handleBackground}
-            onExtractAudio={() => void handleExtractAudio()}
+            onExtractAudio={(mode) => void handleExtractAudio(undefined, mode)}
             onDownloadAudio={handleDownloadAudio}
             onOpenExport={() => setExportOpen(true)}
             onThreshold={setThreshold}
@@ -747,7 +752,7 @@ function App() {
             onToggleVideoCutout={handleToggleVideoCutout}
             onRemoveImage={handleRemoveImage}
             onRestoreImage={handleRestoreImage}
-            onExtractAudio={() => void handleExtractAudio()}
+            onExtractAudio={(mode) => void handleExtractAudio(undefined, mode)}
             onDownloadAudio={() => handleDownloadAudio()}
             onOpenExport={() => setExportOpen(true)}
             onThreshold={setThreshold}

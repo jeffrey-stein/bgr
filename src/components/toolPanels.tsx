@@ -1,3 +1,4 @@
+import * as React from 'react'
 import {
   AlertCircle,
   AudioLines,
@@ -10,6 +11,7 @@ import {
   Image as ImageIcon,
   Loader2,
   Music2,
+  Mic,
   Plus,
   RotateCcw,
   Scissors,
@@ -17,6 +19,7 @@ import {
   Sparkles,
   UploadCloud,
   WandSparkles,
+  Wind,
 } from 'lucide-react'
 import type {
   AiStatus,
@@ -24,8 +27,7 @@ import type {
   MediaAsset,
   ProcessingState,
 } from '../types'
-import { formatBytes, formatTime, isGreen } from '../lib/utils'
-import {
+import { formatBytes, formatTime, isGreen } from '../lib/utils'import {
   AudioPlayer,
   BackdropPicker,
   PrivacyNote,
@@ -413,13 +415,16 @@ export function AudioControls({
   asset: MediaAsset | null
   allAssets: MediaAsset[]
   processing: ProcessingState | null
-  onExtract: () => void
+  onExtract: (mode?: 'full' | 'voice' | 'background') => void
   onDownload: (asset: MediaAsset) => void
   onSelect: (id: string) => void
 }) {
   const audioBusy =
     asset && processing?.assetId === asset.id && processing.kind === 'audio'
   const audioAssets = allAssets.filter((item) => item.audio)
+  const [extractMode, setExtractMode] = React.useState<'full' | 'voice' | 'background'>(
+    'full'
+  )
 
   if (!asset) {
     return (
@@ -453,10 +458,20 @@ export function AudioControls({
           <WaveBars active={!!asset.audio} />
         </div>
         <div className="audio-extract-copy">
-          <strong>{asset.audio ? 'Soundtrack extracted' : 'Extract soundtrack'}</strong>
+          <strong>
+            {asset.audio
+              ? asset.audioMode === 'voice'
+                ? 'Vocals isolated'
+                : asset.audioMode === 'background'
+                  ? 'Background isolated'
+                  : 'Soundtrack extracted'
+              : 'Extract soundtrack'}
+          </strong>
           <span>
             {asset.audio
-              ? `${formatTime(asset.audio.duration)} · ${Math.round(asset.audio.sampleRate / 1000)} kHz WAV`
+              ? `${formatTime(asset.audio.duration)} · ${Math.round(
+                  asset.audio.sampleRate / 1000,
+                )} kHz WAV (${asset.audioMode ?? 'full'})`
               : 'Pull the audio out of this video as a lossless WAV.'}
           </span>
         </div>
@@ -469,15 +484,49 @@ export function AudioControls({
             <Download size={14} /> WAV
           </button>
         ) : (
-          <button
-            type="button"
-            className="primary-action compact"
-            onClick={onExtract}
-            disabled={audioBusy}
-          >
-            {audioBusy ? <Loader2 size={14} className="spin" /> : <Scissors size={14} />}
-            {audioBusy ? 'Extracting' : 'Extract'}
-          </button>
+          <>
+            <div className="audio-mode-row">
+              <button
+                type="button"
+                className={`mode-chip ${
+                  extractMode === 'full' ? 'is-active' : ''
+                }`}
+                onClick={() => setExtractMode('full')}
+                title="Full soundtrack"
+              >
+                Full
+              </button>
+              <button
+                type="button"
+                className={`mode-chip ${
+                  extractMode === 'voice' ? 'is-active' : ''
+                }`}
+                onClick={() => setExtractMode('voice')}
+                title="Isolate voice"
+              >
+                <Mic size={13} /> Voice
+              </button>
+              <button
+                type="button"
+                className={`mode-chip ${
+                  extractMode === 'background' ? 'is-active' : ''
+                }`}
+                onClick={() => setExtractMode('background')}
+                title="Isolate background noise"
+              >
+                <Wind size={13} /> Background
+              </button>
+            </div>
+            <button
+              type="button"
+              className="primary-action compact"
+              onClick={() => onExtract(extractMode)}
+              disabled={audioBusy}
+            >
+              {audioBusy ? <Loader2 size={14} className="spin" /> : <Scissors size={14} />}
+              {audioBusy ? 'Extracting' : 'Extract'}
+            </button>
+          </>
         )}
       </div>
 

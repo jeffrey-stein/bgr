@@ -100,7 +100,7 @@ export function LibraryPanel({
   onRemoveImage: () => void
   onRestoreImage: () => void
   onBackground: (background: Background) => void
-  onExtractAudio: () => void
+  onExtractAudio: (mode?: 'full' | 'voice' | 'background') => void
   onDownloadAudio: (asset: MediaAsset) => void
   onOpenExport: () => void
   onThreshold: (value: number) => void
