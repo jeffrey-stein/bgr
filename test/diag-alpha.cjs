@@ -15,7 +15,7 @@ const fs = require('fs')
   const page = await context.newPage()
   page.on('pageerror', (e) => console.log('[pageerror]', e.message))
 
-  await page.goto('http://127.0.0.1:5173', { waitUntil: 'networkidle' })
+  await page.goto(process.env.BASE_URL || 'http://127.0.0.1:5173', { waitUntil: 'networkidle' })
   await page.waitForTimeout(1200)
   await page.getByText('Start a project', { exact: false }).first().click()
   await page.waitForTimeout(1200)
