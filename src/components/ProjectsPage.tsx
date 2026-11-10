@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Clock3, House, LogOut, Plus, Star, Trash2, UserCircle } from 'lucide-react'
+import { House, LogOut, Plus, Star, Trash2, UserCircle } from 'lucide-react'
 import type { User } from '../lib/auth'
 import {
   createProject,
@@ -125,10 +125,10 @@ export function ProjectsPage({
           <>
             {favorites.length > 0 ? (
               <section className="projects-section">
-                <h2><Star size={16} /> Favorites</h2>
-                <div className="projects-grid">
+                <h2>Favorites</h2>
+                <ul className="projects-list">
                   {favorites.map((p) => (
-                    <ProjectCard
+                    <ProjectRow
                       key={p.id}
                       project={p}
                       onOpen={() => onOpenProject(p)}
@@ -136,21 +136,25 @@ export function ProjectsPage({
                       onDelete={() => { deleteProject(p.id); refresh() }}
                     />
                   ))}
-                </div>
+                </ul>
               </section>
             ) : null}
 
             <section className="projects-section">
-              <h2><Clock3 size={16} /> Recent projects</h2>
+              <h2>Recent projects</h2>
               {projects.length === 0 ? (
-                <div className="empty-panel projects-empty">
-                  <strong>No projects yet</strong>
+                <div className="projects-empty-min">
+                  <p>No projects yet.</p>
                   <span>Create a new project to start editing.</span>
                 </div>
+              ) : recent.length === 0 ? (
+                <div className="projects-empty-min">
+                  <p>All projects are in Favorites.</p>
+                </div>
               ) : (
-                <div className="projects-grid">
+                <ul className="projects-list">
                   {recent.map((p) => (
-                    <ProjectCard
+                    <ProjectRow
                       key={p.id}
                       project={p}
                       onOpen={() => onOpenProject(p)}
@@ -158,7 +162,7 @@ export function ProjectsPage({
                       onDelete={() => { deleteProject(p.id); refresh() }}
                     />
                   ))}
-                </div>
+                </ul>
               )}
             </section>
           </>
@@ -168,7 +172,7 @@ export function ProjectsPage({
   )
 }
 
-function ProjectCard({
+function ProjectRow({
   project,
   onOpen,
   onToggleFav,
@@ -180,30 +184,25 @@ function ProjectCard({
   onDelete: () => void
 }) {
   return (
-    <div className="project-card">
-      <button type="button" className="project-card-main" onClick={onOpen}>
-        <div className="project-card-thumb">
-          {project.thumb ? <img src={project.thumb} alt="" /> : <span className="project-card-ph" />}
-        </div>
-        <div className="project-card-meta">
-          <strong>{project.name || 'Untitled project'}</strong>
-          <span>Edited {timeAgo(project.updatedAt)}</span>
-        </div>
+    <li className="project-row">
+      <button type="button" className="project-row-main" onClick={onOpen}>
+        <span className="project-row-name">{project.name || 'Untitled project'}</span>
+        <span className="project-row-time">{timeAgo(project.updatedAt)}</span>
       </button>
-      <div className="project-card-actions">
+      <div className="project-row-actions">
         <button
           type="button"
-          className={`icon-button ${project.favorite ? 'is-fav' : ''}`}
+          className={`icon-button subtle ${project.favorite ? 'is-fav' : ''}`}
           onClick={onToggleFav}
           aria-label={project.favorite ? 'Unfavorite' : 'Favorite'}
           title={project.favorite ? 'Unfavorite' : 'Favorite'}
         >
           <Star size={15} />
         </button>
-        <button type="button" className="icon-button" onClick={onDelete} aria-label="Delete project" title="Delete">
+        <button type="button" className="icon-button subtle" onClick={onDelete} aria-label="Delete project" title="Delete">
           <Trash2 size={15} />
         </button>
       </div>
-    </div>
+    </li>
   )
 }

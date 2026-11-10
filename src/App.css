@@ -2590,27 +2590,29 @@ transition-duration:.01ms!important}
 .auth-note{margin:10px 0 0;font-size:11px;color:#777;text-align:center}
 
 /* --- Projects page --- */
-.projects-page{min-height:100vh;background:#0c0c0c;color:#f2f2f2}
-.projects-topbar{height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid #222;position:sticky;top:0;background:rgba(12,12,12,.92);backdrop-filter:blur(8px);z-index:10}
+.projects-page{min-height:100vh;background:#0b0b0b;color:#f2f2f2}
+.projects-topbar{height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid #1c1c1c;position:sticky;top:0;background:rgba(11,11,11,.9);backdrop-filter:blur(8px);z-index:10}
 .projects-top-left,.projects-top-right{display:flex;align-items:center;gap:10px}
-.projects-main{max-width:1100px;margin:0 auto;padding:28px 20px 60px}
-.projects-hero-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap}
-.projects-hero-row h1{margin:0 0 4px;font-size:30px}
-.projects-hero-row p{margin:0;color:#a3a3a3}
-.projects-section{margin-top:26px}
-.projects-section h2{display:flex;align-items:center;gap:8px;font-size:16px;margin:0 0 12px;color:#e6e6e6}
-.projects-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
-.project-card{background:#151515;border:1px solid #262626;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
-.project-card-main{all:unset;cursor:pointer;display:flex;flex-direction:column}
-.project-card-thumb{height:130px;background:linear-gradient(135deg,#1f1f1f,#141414);display:flex;align-items:center;justify-content:center}
-.project-card-thumb img{width:100%;height:100%;object-fit:cover}
-.project-card-ph{width:48px;height:32px;border-radius:6px;background:#2a2a2a;border:1px dashed #444}
-.project-card-meta{padding:10px 12px 8px;display:flex;flex-direction:column;gap:2px}
-.project-card-meta strong{font-size:14px}
-.project-card-meta span{font-size:12px;color:#8d8d8d}
-.project-card-actions{display:flex;gap:6px;padding:0 10px 10px;margin-top:auto}
-.project-card-actions .icon-button.is-fav{color:#ffd36a}
-.projects-empty{padding:30px;text-align:center}
+.projects-main{max-width:900px;margin:0 auto;padding:32px 20px 64px}
+.projects-hero-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:28px;flex-wrap:wrap}
+.projects-hero-row h1{margin:0 0 4px;font-size:28px;font-weight:600;letter-spacing:-0.02em}
+.projects-hero-row p{margin:0;color:#8f8f8f;font-size:14px}
+.projects-section{margin-top:28px}
+.projects-section h2{font-size:12px;font-weight:500;margin:0 0 8px;color:#777;text-transform:uppercase;letter-spacing:0.06em}
+.projects-list{list-style:none;margin:0;padding:0;border-top:1px solid #1e1e1e}
+.project-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #1e1e1e;padding:2px 0}
+.project-row-main{all:unset;cursor:pointer;flex:1;min-width:0;display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding:12px 4px;border-radius:8px}
+.project-row-main:hover{background:#141414}
+.project-row-name{font-size:14px;color:#efefef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.project-row-time{font-size:12px;color:#6f6f6f;flex-shrink:0}
+.project-row-actions{display:flex;align-items:center;gap:2px;opacity:0.35;transition:opacity .15s ease}
+.project-row:hover .project-row-actions,.project-row:focus-within .project-row-actions{opacity:1}
+.icon-button.subtle{background:transparent;border:none;color:#9a9a9a;width:30px;height:30px}
+.icon-button.subtle:hover{color:#fff;background:#1a1a1a}
+.icon-button.subtle.is-fav{color:#e3c46b}
+.projects-empty-min{padding:18px 2px;color:#777;font-size:14px}
+.projects-empty-min p{margin:0 0 4px;color:#a8a8a8}
+.projects-empty-min span{font-size:13px;color:#666}
 .projects-gate{margin-top:10px}
 .gate-card{max-width:560px;background:#151515;border:1px solid #262626;border-radius:14px;padding:22px}
 .gate-card h2{margin:0 0 6px;font-size:20px}
